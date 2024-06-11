@@ -164,7 +164,7 @@ com.dot.new(combined.sct, feature = c('Pparg','Ppargc1b','Ppara',
                                                  'Arhgap15','Ikzf1','Dock2')
                        ,groups = "con_gan",strip.color = cluster_colors)
 
-# fig 1F ------
+# fig 1F & 1G------
 Idents(combined.sct) <- combined.sct$large_ct
 adipo.only <- subset(combined.sct, cells = WhichCells(combined.sct, idents = c('Brown adipocytes')))
 dim(adipo.only)
@@ -197,7 +197,217 @@ adipo.only.inte.2 <- adipo.only.inte.2 %>%
   RunPCA( verbose = FALSE) %>% 
   RunUMAP( reduction = "pca", dims = 1:40, verbose = FALSE) 
 
+adipo.only.inte.2$con_gan <- factor(adipo.only.inte.2$con_gan, levels = c('MC_male',
+                                                                          'MO_male',
+                                                                          'MC_female',
+                                                                          'MO_female'))
+
+DimPlot(adipo.only.inte.2,raster = F,label = F, cols = simpson.col, group.by = 'con_gan',raster.dpi = c(4096,4096),split.by = 'con_gan') + ggtitle('') +
+  NoAxes() + 
+  # scale_color_igv() + 
+  theme(panel.background=element_rect(fill='transparent', color='black'), 
+        title = element_text(size = 10),
+        legend.text = element_text(size = 10), legend.key.height=unit(.8,"line"))
+
+DefaultAssay(adipo.only.inte.2) <-'RNA'
+adipo.only.inte.2 <- NormalizeData(adipo.only.inte.2)
+FeaturePlot(adipo.only.inte.2, features = c('Peg3','Ucp1'),ncol = 2,
+            split.by = 'con_gan',
+            # blend = T,
+            cols =c("grey80", "lemonchiffon1","indianred1", "darkred"),
+            order = T,
+            min.cutoff = 0.5,raster = F) 
+
+p1 <- FeaturePlot(adipo.only.inte.2, features = c('Klb'),
+                  pt.size = .05,
+                  cols = c("grey80", "lemonchiffon1","indianred1", "darkred"),
+                  combine = F,raster = F,order = T,
+                  split.by = 'con_gan',min.cutoff = 0.5) 
+for(i in 1:length(p1)) {
+  p1[[i]] <- p1[[i]] + NoLegend() + NoAxes() + theme(panel.background=element_rect(fill='transparent', color='black'), title = element_text(size = 8))
+}
+patchwork::wrap_plots(c(p1))
+
+col_fun = colorRamp2(c(0, 0.25, 0.75, 1), c("grey80", "lemonchiffon1","indianred1", "darkred"))
+lgd = Legend(col_fun = col_fun, title = "Relative \n expression", at = c(0, 1), 
+             labels = c("min", "max"))
+draw(lgd)
+
+for (ct in unique(adipo.only.inte.2$gander)) {
+  print(ct)
+  Idents(adipo.only.inte.2) <- 'gander'
+  sub.seu.1 <- subset(adipo.only.inte.2, idents = ct)
+  for (gp in nrow(comlist)) {
+    age1 <- comlist[gp,1]
+    age2 <- comlist[gp,2]
+    DEGs <- FindMarkers(sub.seu.1,
+                        ident.1 = age1,
+                        ident.2 = age2, 
+                        logfc.threshold = 0.01,
+                        group.by = 'condition') %>% dplyr::filter(p_val_adj < 0.05)
+    DEGs.name <- paste('b.adi.all',ct,age2,age1,sep = '_')
+    assign(DEGs.name,DEGs)
+  }
+}
+
+b.adi.all.deg <- list(b.adi.all_male_MO_MC = b.adi.all_male_MO_MC,
+                      b.adi.all_female_MO_MC = b.adi.all_female_MO_MC)
+intersect(rownames(b.adi.all_male_MO_MC), rownames(b.adi.all_female_MO_MC))
+rio::export(b.adi.all.deg, file = '../01.analysis/063fig.final//Table4.brwon adipocytes wilcox.test.lfc0.01.xlsx',row.names = T)
+
+b.adi.male.lfc.0.2 <- b.adi.all_male_MO_MC[abs(b.adi.all_male_MO_MC$avg_log2FC) > 0.2,]
+b.adi.male.lfc.0.2$gene<- rownames(b.adi.male.lfc.0.2)
+b.adi.male.lfc.0.2$cluster <- ifelse(b.adi.male.lfc.0.2$avg_log2FC> 0.2,
+                                      'MC_male','MO_male')
+
+b.adi.female.lfc.0.2 <- b.adi.all_female_MO_MC[abs(b.adi.all_female_MO_MC$avg_log2FC) > 0.2,]
+b.adi.female.lfc.0.2$gene<- rownames(b.adi.female.lfc.0.2)
+b.adi.female.lfc.0.2$cluster <- ifelse(b.adi.female.lfc.0.2$avg_log2FC> 0.2,
+                                      'MC_female','MO_female')
+tmp <- rbind(b.adi.male.lfc.0.2,
+             b.adi.female.lfc.0.2)
+
+Idents(adipo.only.inte.2) <- adipo.only.inte.2$con_gan
+b.adi.data <- prepareDataFromScRNA(adipo.only.inte.2,
+                                diffData = tmp,
+                                showAverage = T,
+                                group.by = 'con_gan',keep.uniqGene = F,
+                                scale.data = T)
+saveRDS(b.adi.data, file = '../01.analysis/063fig.final/b.adi.data.RDS',compress = F)
+
+library(EnhancedVolcano)
+
+keyvals.colour <- ifelse(
+  b.adi.all_male_MO_MC$avg_log2FC < -0.25, 'royalblue',
+  ifelse(b.adi.all_male_MO_MC$avg_log2FC > 0.25, 'red3',
+         'gray80'))
+keyvals.colour[is.na(keyvals.colour)] <- 'gray80'
+names(keyvals.colour)[keyvals.colour == 'red3'] <- 'mND high'
+names(keyvals.colour)[keyvals.colour == 'gray80'] <- 'No sig'
+names(keyvals.colour)[keyvals.colour == 'royalblue'] <- 'mHFD high'
+
+EnhancedVolcano(b.adi.all_male_MO_MC,
+                lab = rownames(b.adi.all_male_MO_MC),
+                selectLab = 'Ucp1',
+                x = 'avg_log2FC',
+                y = 'p_val_adj',
+                FCcutoff = 0.25,
+                pCutoff = 0.05,
+                ylab = bquote(~-Log[10]~ 'padj'),
+                pointSize = 1.0,
+                labSize = 4,
+                labCol = 'black',
+                labFace = 'bold',
+                boxedLabels = TRUE,
+                parseLabels = T,
+                # col = c('gray80', 'gray80', 'gray80', 'red3'),
+                colCustom = keyvals.colour,
+                colAlpha = 2/5,
+                legendPosition = 'right',
+                legendLabSize = 10,
+                legendIconSize = 3.0,
+                drawConnectors = TRUE,
+                widthConnectors = .5,
+                max.overlaps = 300,
+                colConnectors = '#14213d',
+                title = 'Male',
+                subtitle = '',
+                xlim = c(-1.5,1.5)
+) 
 
 
+keyvals.colour <- ifelse(
+  b.adi.all_female_MO_MC$avg_log2FC < -0.25, 'royalblue',
+  ifelse(b.adi.all_female_MO_MC$avg_log2FC > 0.25, 'red3',
+         'gray80'))
+keyvals.colour[is.na(keyvals.colour)] <- 'gray80'
+names(keyvals.colour)[keyvals.colour == 'red3'] <- 'mND high'
+names(keyvals.colour)[keyvals.colour == 'gray80'] <- 'No sig'
+names(keyvals.colour)[keyvals.colour == 'royalblue'] <- 'mHFD high'
 
+EnhancedVolcano(b.adi.all_female_MO_MC,
+                lab = rownames(b.adi.all_female_MO_MC),
+                selectLab = 'Ucp1',
+                x = 'avg_log2FC',
+                y = 'p_val_adj',
+                FCcutoff = 0.25,
+                pCutoff = 0.05,
+                ylab = bquote(~-Log[10]~ 'padj'),
+                pointSize = 1.0,
+                labSize = 4,
+                labCol = 'black',
+                labFace = 'bold',
+                boxedLabels = TRUE,
+                parseLabels = T,
+                # col = c('gray80', 'gray80', 'gray80', 'red3'),
+                colCustom = keyvals.colour,
+                colAlpha = 2/5,
+                legendPosition = 'right',
+                legendLabSize = 10,
+                legendIconSize = 3.0,
+                drawConnectors = TRUE,
+                widthConnectors = .5,
+                max.overlaps = 300,
+                colConnectors = '#14213d',
+                title = 'Female',
+                subtitle = '',
+                xlim = c(-1.5,1.5)
+) 
 
+# fig 1H & I ------
+library(ggplot2)
+# install.packages('cols4all')
+library(cols4all)
+
+go.plot <- read.table('clipboard',header = T,sep = '\t')
+male.go <- go.plot[1:16,]
+male.go$'-log10pvalue' <- ifelse(male.go$group == 'MC_male', -log10(male.go$pvalue), -(-log10(male.go$pvalue)))
+male.go$Description <- factor(male.go$Description,
+                          levels = rev(male.go$Description))
+
+female.go <- go.plot[17:32,]
+female.go$'-log10pvalue' <- ifelse(female.go$group == 'MC_female', -log10(female.go$pvalue), -(-log10(female.go$pvalue)))
+female.go$Description <- factor(female.go$Description,
+                              levels = rev(female.go$Description))
+
+mytheme3 <- theme(legend.position = 'none',
+                  axis.text.y = element_blank(),
+                  axis.ticks.y = element_blank(),
+                  panel.grid.major = element_blank(),
+                  panel.grid.minor = element_blank(),
+                  panel.border = element_blank(),
+                  axis.line.x = element_line(color = 'grey60', size = 1.1),
+                  axis.text = element_text(size = 12),
+                  plot.margin = margin(t = 5.5, r = 10, l = 5.5, b = 5.5))
+
+#根据上下调标签拆分数据：
+up <- female.go[which(female.go$`-log10pvalue` > 0),]
+down <- female.go[which(female.go$`-log10pvalue` < 0),]
+
+p3 <- ggplot(female.go,aes(x = `-log10pvalue`, y = Description)) +
+  geom_col(aes(fill = `-log10pvalue`), width = 0.1) + #添加条形图，收窄柱子为一条线
+  geom_point(aes(size = ratio, color = `-log10pvalue`)) + #添加散点/气泡
+  scale_size_continuous(range = c(2, 7)) +
+  scale_color_continuous_c4a_div('div_gn_wh_rd', mid = 0, reverse = F) +
+  scale_fill_continuous_c4a_div('div_gn_wh_rd', mid = 0, reverse = F) +
+  scale_x_continuous(breaks = seq(-20, 20, by = 5),
+                     labels = abs(seq(-20, 20, by = 5))) + #x轴标签显示绝对值
+  ylab('')
+
+p5 <- p3 + theme_bw() + mytheme3 +
+  geom_text(data = up,aes(x = -0.5, y = Description, label = Description),
+            size = 3.5, hjust = 1)+ #标签右对齐
+  geom_text(data = down, aes(x = 0.5, y = Description, label = Description),
+            size = 3.5, hjust = 0) + #标签左对齐
+  geom_text(x = 15, y = 15, label = "Up", size = 6, color = '#EE4E4A') +
+  geom_text(x = -16, y = 5, label = "Down", size = 6, color = '#419A18')
+p5 #上下调富集条形图or气泡图逻辑相同，不再赘述
+
+# fig 1J ------
+p1 <- DimPlot(adipo.only.inte.2,group.by = 'con_gan',cols = cr.col,raster = T) # 4.8*4
+p1$layers[[1]]$mapping$alpha <- 0.7
+p1 <- p1 + scale_alpha_continuous(range = 0.7, guide = F)
+p1
+
+# fig 1K -----
+FeaturePlot(adipo.only.inte.2, features = c('Ucp1'), cols = c('#a8dadc','#f1faee',"#e63946"),split.by = 'con_gan',order = T)
