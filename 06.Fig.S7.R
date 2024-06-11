@@ -23,7 +23,7 @@ ComplexHeatmap::pheatmap(tpm_cor,
                          annotation_col = ann,
                          annotation_colors = ha_left.col)
 
-# OXI ------
+# FAO ------
 library(DOSE)
 library(GOSemSim)
 library(clusterProfiler)
@@ -154,7 +154,87 @@ GO_DATA <- get_GO_data("org.Mm.eg.db", "ALL", "SYMBOL")
 FAT.gene <- getGO("GO:0019395")
 d_p(na.omit(hl.tpm.clean[FAT.gene$`fatty acid oxidation`,]),group_list_large,'FAO.TPM')
 
+d_p_pca <- function(tpm,group_list){
+  tpm.t = as.data.frame(t(tpm))
+  tpm.t = cbind(tpm.t,group_list)
+  tpm.pca <- PCA(tpm.t[,-ncol(tpm.t)],graph = FALSE)
+}
+tpm.pca <- d_p_pca(na.omit(hl.tpm.clean[FAT.gene$`fatty acid oxidation`,]),group_list_large)
 
+dist.pca <- tpm.pca$ind$coord[,1:2] %>% as.data.frame()
+dist.pca <- dist.pca[c(1:6,19:24,7:12,25:30,13:18,31:36),]
+dist.pca.euc <- dist(dist.pca[1:36,],method = 'euclidean') %>% as.matrix()
+dist.ND_FGF <- dist.pca.euc[13:24,1:12] %>% as.data.frame()
+dist.FGF_HFD <- dist.pca.euc[13:24,25:36] %>% as.data.frame()
+
+dist.ND_FGF.long <- melt(dist.ND_FGF)
+dist.FGF_HFD.long <- melt(dist.FGF_HFD)
+
+dist.group <- data.frame(dist = c(dist.ND_FGF.long$value,dist.FGF_HFD.long$value),
+                         group = c(rep('ND_FGF',144),rep('FGF_HFD',144)))
+
+p1 <- ggpubr::ggboxplot(dist.group, x="group", y="dist", width = 0.5, 
+                color = "black",
+                fill="group",
+                palette = "npg",
+                xlab = F, 
+                bxp.errorbar=T,
+                bxp.errorbar.width=0.5,
+                size=1, 
+                outlier.shape=NA,
+                legend = "right",
+                alpha = 0.8) + 
+  geom_jitter(color="black", size=0.4, alpha=1,width = 0.1, height = 0.5)+
+  ylab('Euclidean distance')  + 
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = 45,hjust = 1,vjust = 1),axis.title.x = element_blank(),legend.position = 'none')
+
+my_comparisons <- list(c("ND_FGF", "FGF_HFD"))
+p1+ggpubr::stat_compare_means(comparisons = my_comparisons,
+                      method = "wilcox.test")
+
+# OXI -------
+OXI.gene <- getGO('GO:0006119')
+d_p(na.omit(hl.tpm.clean[OXI.gene$`oxidative phosphorylation`,]),group_list_large,'OXPHOS.TPM')
+
+d_p_pca <- function(tpm,group_list){
+  tpm.t = as.data.frame(t(tpm))
+  tpm.t = cbind(tpm.t,group_list)
+  tpm.pca <- PCA(tpm.t[,-ncol(tpm.t)],graph = FALSE)
+}
+tpm.pca <- d_p_pca(na.omit(hl.tpm.clean[OXI.gene$`oxidative phosphorylation`,]),group_list_large)
+
+dist.pca <- tpm.pca$ind$coord[,1:2] %>% as.data.frame()
+dist.pca <- dist.pca[c(1:6,19:24,7:12,25:30,13:18,31:36),]
+dist.pca.euc <- dist(dist.pca[1:36,],method = 'euclidean') %>% as.matrix()
+dist.ND_FGF <- dist.pca.euc[13:24,1:12] %>% as.data.frame()
+dist.FGF_HFD <- dist.pca.euc[13:24,25:36] %>% as.data.frame()
+
+dist.ND_FGF.long <- melt(dist.ND_FGF)
+dist.FGF_HFD.long <- melt(dist.FGF_HFD)
+
+dist.group <- data.frame(dist = c(dist.ND_FGF.long$value,dist.FGF_HFD.long$value),
+                         group = c(rep('ND_FGF',144),rep('FGF_HFD',144)))
+
+p1 <- ggpubr::ggboxplot(dist.group, x="group", y="dist", width = 0.5, 
+                color = "black",
+                fill="group",
+                palette = "npg",
+                xlab = F,
+                bxp.errorbar=T,
+                bxp.errorbar.width=0.5, 
+                size=1, #
+                outlier.shape=NA,
+                legend = "right",
+                alpha = 0.8) + 
+  geom_jitter(color="black", size=0.4, alpha=1,width = 0.1, height = 0.5)+
+  ylab('Euclidean distance')  + 
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = 45,hjust = 1,vjust = 1),axis.title.x = element_blank(),legend.position = 'none')
+
+my_comparisons <- list(c("ND_FGF", "FGF_HFD"))
+p1+ggpubr::stat_compare_means(comparisons = my_comparisons,
+                      method = "wilcox.test")
 
 
 
