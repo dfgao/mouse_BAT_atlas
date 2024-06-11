@@ -111,7 +111,7 @@ d_p_pca <- function(tpm,group_list){
   tpm.t = cbind(tpm.t,group_list)
   tpm.pca <- PCA(tpm.t[,-ncol(tpm.t)],graph = FALSE)
 }
-tpm.pca <- d_p_pca(na.omit(hl.tpm.clean[FAT.gene$`fatty acid oxidation`,]),group_list_large)
+tpm.pca <- d_p_pca(na.omit(hl.tpm.clean),group_list_large)
 
 dist.pca <- tpm.pca$ind$coord[,1:2] %>% as.data.frame()
 dist.pca <- dist.pca[c(1:6,19:24,7:12,25:30,13:18,31:36),]
