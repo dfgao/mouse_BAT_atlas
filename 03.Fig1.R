@@ -380,28 +380,27 @@ mytheme3 <- theme(legend.position = 'none',
                   axis.text = element_text(size = 12),
                   plot.margin = margin(t = 5.5, r = 10, l = 5.5, b = 5.5))
 
-#根据上下调标签拆分数据：
 up <- female.go[which(female.go$`-log10pvalue` > 0),]
 down <- female.go[which(female.go$`-log10pvalue` < 0),]
 
 p3 <- ggplot(female.go,aes(x = `-log10pvalue`, y = Description)) +
   geom_col(aes(fill = `-log10pvalue`), width = 0.1) + #添加条形图，收窄柱子为一条线
-  geom_point(aes(size = ratio, color = `-log10pvalue`)) + #添加散点/气泡
+  geom_point(aes(size = ratio, color = `-log10pvalue`)) +
   scale_size_continuous(range = c(2, 7)) +
   scale_color_continuous_c4a_div('div_gn_wh_rd', mid = 0, reverse = F) +
   scale_fill_continuous_c4a_div('div_gn_wh_rd', mid = 0, reverse = F) +
   scale_x_continuous(breaks = seq(-20, 20, by = 5),
-                     labels = abs(seq(-20, 20, by = 5))) + #x轴标签显示绝对值
+                     labels = abs(seq(-20, 20, by = 5))) +
   ylab('')
 
 p5 <- p3 + theme_bw() + mytheme3 +
   geom_text(data = up,aes(x = -0.5, y = Description, label = Description),
-            size = 3.5, hjust = 1)+ #标签右对齐
+            size = 3.5, hjust = 1)+ 
   geom_text(data = down, aes(x = 0.5, y = Description, label = Description),
-            size = 3.5, hjust = 0) + #标签左对齐
+            size = 3.5, hjust = 0) + 
   geom_text(x = 15, y = 15, label = "Up", size = 6, color = '#EE4E4A') +
   geom_text(x = -16, y = 5, label = "Down", size = 6, color = '#419A18')
-p5 #上下调富集条形图or气泡图逻辑相同，不再赘述
+p5 
 
 # fig 1J ------
 p1 <- DimPlot(adipo.only.inte.2,group.by = 'con_gan',cols = cr.col,raster = T) # 4.8*4
