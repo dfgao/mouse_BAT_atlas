@@ -919,5 +919,555 @@ tmp.vis(object = sc.data,
         add.bar = T)
 dev.off()
 
-# 
+# fig S1B -------
+library(sfsmisc)
+library(MASS)
+celltypes <- unique(combined.sct@meta.data$large_ct)
+set.seed(1234)
 
+getEuclideanDistance <- function(celltype, lowcv = T){
+  print(paste("Working on", celltype))
+  library(hopach)
+  tmp <- subset(combined.sct, cells = WhichCells(combined.sct, idents = celltype))
+  
+  counts <- GetAssayData(object = tmp, slot = "counts",assay = 'RNA')
+  nonzero <- counts > 0
+  keep_genes <- Matrix::rowSums(nonzero) > 0
+  expr <- counts[keep_genes, ]
+  
+  ifelse(min(table(tmp$condition)) > 300, 
+         expr <- expr[,c(rownames(tmp@meta.data[tmp$condition == 'MC',])[sample(1:nrow(tmp@meta.data[tmp$condition == 'MC',]),300)],
+                         rownames(tmp@meta.data[tmp$condition == 'MO',])[sample(1:nrow(tmp@meta.data[tmp$condition == 'MO',]),300)])
+                       ],
+         expr <- expr)
+  tmp <- subset(tmp,cells = colnames(expr))
+  
+  Down_Sample_Matrix <-function (expr_mat) {
+    min_lib_size <- min(colSums(expr_mat))
+    down_sample <- function(x) {
+      prob <- min_lib_size/sum(x)
+      return(unlist(lapply(x, function(y) {
+        rbinom(1, y, prob)
+      })))
+    }
+    down_sampled_mat <- apply(expr_mat, 2, down_sample)
+    return(down_sampled_mat)
+  }
+  ds_expr <- Down_Sample_Matrix(expr)
+  
+  nsample <- min(table(tmp@meta.data$condition)[c("MC", "MO")])
+  if(nsample < 10){
+    print("Not enough cells")
+    return(NULL)
+  } 
+  print(nsample)
+  MO_r <- sample(rownames(tmp@meta.data)[which(tmp@meta.data$condition == "MO")], nsample)
+  MC_r <- sample(rownames(tmp@meta.data)[which(tmp@meta.data$condition == "MC")], nsample)
+  ds_expr_r <- ds_expr[, c(MC_r, MO_r)]
+  
+  if(lowcv){
+    getLowCVgenes <- function(matr){
+      means <- Matrix::rowMeans(matr)
+      bins <- quantile(means, c(seq(from = 0, to = 1, length = 11)))
+      mean_bin <- unlist(lapply(means, function(x) min(which(bins >= x))))
+      asplit <- split(names(means), mean_bin)
+      genes <- unique(unlist(lapply(asplit[setdiff(names(asplit), c("1", "11"))], function(x){
+        coef_var <- apply(matr, 1, function(x) sd(x)/mean(x))
+        bottom10percent <- names(head(sort(coef_var), round(10*length(coef_var))))
+      })))
+      genes
+    }
+    genes <- getLowCVgenes(ds_expr_r)
+  }
+  else{
+    genes <- rownames(ds_expr_r)
+  }
+  
+  calcEuclDist <- function(matr, MC, MO){
+    tmp <- data.matrix(sqrt(matr[genes, MC]))
+    mean <- rowMeans(sqrt(matr[genes, MC]))
+    d_MC <- distancevector(t(tmp), mean , d="euclid")
+    names(d_MC) <- MC
+    
+    tmp <- data.matrix(sqrt(matr[genes, MO]))
+    mean <- rowMeans(sqrt(matr[genes, MO]))
+    d_MO <- distancevector(t(tmp), mean , d="euclid")
+    names(d_MO) <- MO
+    
+    list(MC = d_MC, MO = d_MO)
+  }
+  ds <- calcEuclDist(matr = ds_expr_r, MO = MO_r, MC = MC_r)
+  ds
+}
+res <- lapply(celltypes, function(x) getEuclideanDistance(x, lowcv = F))
+names(res) <- celltypes
+res_original <- res
+options(scipen = 3)
+diffs <- unlist(lapply(res_original, function(x) log2(mean(x[[2]]) / mean(x[[1]]))))
+pvals <- unlist(lapply(res_original, function(x) wilcox.test(x[[1]], x[[2]])$p.value))
+adj_pvals <- p.adjust(pvals, method = "BH")
+
+ord <- c(1,7,3,4,10,5,6,11,8,2,9)
+par(mar = c(15,5,5,5))
+boxplot(do.call(c, res[ord]),
+            gap = c(0.155,0.17),
+        las = 2, outline = F,
+        col = c("#0B996F", "#D6570D"),
+        ylab = "Transcriptional noise", 
+        xaxt = 'n', ylim = c(0.11,0.19),
+        axes = F,
+        boxplot.width = 0.5)
+
+axis(1, at = seq(from = 1.5, to = 22, by = 2), names(res)[ord], las = 2)
+axis(side = 2, at = c(0.11, 0.14, 0.16), labels = FALSE)
+
+# fig S1C -----
+adipo.sub <- subset(combined.sct, cells = WhichCells(combined.sct, idents = c('Brown adipocytes','White adipocytes','Prolif.adipocytes','FAPs')))
+DimPlot(adipo.sub,raster = T)
+
+adipo.sub <- RunUMAP(adipo.sub,dims = 1:30)
+DimPlot(adipo.sub,raster = T,label = F, cols = c(npg.col), group.by = 'large_ct',raster.dpi = c(512,512),pt.size = 1) + ggtitle('Cell types') +
+  NoAxes() + 
+  theme(panel.background=element_rect(fill='transparent', color='black'), 
+        title = element_text(size = 10),
+        legend.text = element_text(size = 10), legend.key.height=unit(.8,"line"))
+
+
+adipo.sub <- CreateSeuratObject(counts = GetAssayData(object = adipo.sub, slot = "counts"),
+                                meta.data = adipo.sub@meta.data)
+# re-integrated adipocytes -------
+adipo.split <- SplitObject(adipo.sub,split.by = 'samples')
+
+adipo.split <- lapply(X = adipo.split, FUN = function(x){
+  x <- NormalizeData(x)
+  x <- FindVariableFeatures(x, selection.method = 'vst',nfeatures = 1500)
+})
+features <- SelectIntegrationFeatures(adipo.split,nfeatures = 1500)
+
+plan(multisession, workers=40)
+adipo.split <- lapply(X = adipo.split, FUN = function(x){
+  x <- ScaleData(x, vars.to.regress = c("mitoRatio",'G2M.Score','S.Score'),features = features)
+  x <- RunPCA(x,features = features)
+})
+save.image()
+anchors <- FindIntegrationAnchors(object.list = adipo.split,
+                                  # normalization.method = "SCT",
+                                  anchor.features = features,
+                                  reduction = 'rpca',k.anchor = 20)
+adipo.inte <- IntegrateData(anchorset = anchors)
+DefaultAssay(adipo.inte)
+
+adipo.inte$condition <- NA
+adipo.inte$condition[which(str_detect(adipo.inte@meta.data$cells, "^HDF_"))] <- "HFD"
+adipo.inte$condition[which(str_detect(adipo.inte@meta.data$cells, "^ND_"))] <- "ND"
+adipo.inte$gander <- factor(c(rep('female',21684), rep('male',24825), rep('female',28220),rep('male',31450)))
+
+adipo.inte <- adipo.inte %>% 
+  ScaleData() %>%
+  RunPCA( verbose = FALSE) %>% 
+  RunUMAP( reduction = "pca", dims = 1:30, verbose  = FALSE) %>% 
+  FindNeighbors( reduction = "pca", dims = 1:30) %>% 
+  FindClusters( resolution = c(0.4, 0.6, 0.8, 1.0,1.2))                    
+
+adipo.inte$condition <- NA
+adipo.inte$condition[which(str_detect(adipo.inte@meta.data$cells, "^HDF_"))] <- "MO"
+adipo.inte$condition[which(str_detect(adipo.inte@meta.data$cells, "^ND_"))] <- "MC"
+
+adipo.inte$gander <- NA
+adipo.inte$gander[which(str_detect(adipo.inte@meta.data$samples, "HFD_F1"))] <- "female"
+adipo.inte$gander[which(str_detect(adipo.inte@meta.data$samples, "HFD_F2"))] <- "female"
+adipo.inte$gander[which(str_detect(adipo.inte@meta.data$samples, "ND_F1"))] <- "female"
+adipo.inte$gander[which(str_detect(adipo.inte@meta.data$samples, "ND_F2"))] <- "female"
+adipo.inte$gander[which(str_detect(adipo.inte@meta.data$samples, "HFD_M1"))] <- "male"
+adipo.inte$gander[which(str_detect(adipo.inte@meta.data$samples, "HFD_M2"))] <- "male"
+adipo.inte$gander[which(str_detect(adipo.inte@meta.data$samples, "ND_M1"))] <- "male"
+adipo.inte$gander[which(str_detect(adipo.inte@meta.data$samples, "ND_M2"))] <- "male"
+adipo.inte$con_gan <- paste0(adipo.inte$condition,'_',adipo.inte$gander)
+adipo.inte$con_gan <- factor(adipo.inte$con_gan, levels = c('MC_male','MO_male',
+                                                          'MC_female','MO_female'))
+
+adipo.inte$large_ct[which(str_detect(adipo.inte@meta.data$large_ct,"Prolif.adipocytes"))] <- "Brown adipocytes"
+adipo.inte$large_ct <- factor(adipo.inte$large_ct, levels = c('FAPs','Brown adipocytes','White adipocytes'))
+adipo.inte$large_ct <- adipo.inte$large_ct 
+
+dittoDimPlot(adipo.inte, "large_ct", size = 1)
+DimPlot(adipo.inte,raster = T,label = T, cols = npg.col, group.by = 'large_ct',raster.dpi = c(4096,4096),pt.size = 6) + ggtitle('Cell types') +
+  NoAxes() + 
+  # scale_color_igv() + 
+  theme(panel.background=element_rect(fill='transparent', color='black'), 
+        title = element_text(size = 10),
+        legend.text = element_text(size = 10), legend.key.height=unit(.8,"line"))
+
+# fig S1D -----
+adipo.inte.5000 <- subset(adipo.inte,cells = c(rownames(adipo.inte@meta.data[sample(c(1:106179),5000),])))
+library(monocle3)
+library(Seurat)
+library(viridis)
+library(ggsci)
+
+mono <- GetAssayData(adipo.inte.5000,assay = 'RNA', layer = 'counts')
+cell_meta <- adipo.inte.5000@meta.data
+gene_annotation <- data.frame(gene_short_name = rownames(mono))
+rownames(gene_annotation) <- rownames(mono)
+
+cds <- new_cell_data_set(mono,
+                         cell_metadata = cell_meta,
+                         gene_metadata = gene_annotation)
+cds <- preprocess_cds(cds, num_dim = 10)
+plot_pc_variance_explained(cds)
+
+# mono umap
+cds <- reduce_dimension(cds, preprocess_method = "PCA")
+plot_cells(cds, reduction_method="UMAP", color_cells_by="large_ct", group_label_size = 5,cell_size = 1) + ggtitle('cds.umap')
+
+# seurat umap
+cds.embed <- cds@int_colData$reducedDims$UMAP
+int.embed <- Embeddings(adipo.inte.5000, reduction = "umap")
+# int.embed <- int.embed[rownames(cds.embed),]
+cds@int_colData$reducedDims$UMAP <- int.embed
+plot_cells(cds, reduction_method="UMAP", color_cells_by="large_ct") + ggtitle('bov.umap')
+
+# cds <- cluster_cells(cds,reduction_method = 'UMAP',resolution = .001)
+cds <- cluster_cells(cds,reduction_method = 'UMAP',resolution = 1)
+# get trajectory
+cds <- learn_graph(cds, use_partition = F)
+plot_cells(cds, label_groups_by_cluster = FALSE, label_leaves = F,
+           label_branch_points = FALSE, color_cells_by="large_ct", group_label_size = 0,cell_size = 1) + 
+  scale_color_npg() +
+  ggtitle("Pseeudotime") +
+  NoAxes() + 
+  theme(panel.background=element_rect(fill='transparent', color='black'), title = element_text(size = 10),
+        legend.text = element_text(size = 8), legend.key.height=unit(.8,"line"))
+
+
+test <- order_cells(cds)
+plot_cells(test, color_cells_by = "pseudotime", 
+           label_cell_groups = F, 
+           label_leaves = FALSE,  
+           label_branch_points = F,
+           group_label_size = 1,
+           cell_size = .1,
+           label_roots = F,
+           cell_stroke = 1,
+           trajectory_graph_segment_size = 1
+) + NoAxes() + 
+  theme(panel.background=element_rect(fill='transparent', color='black'), 
+        title = element_text(size = 10),
+        legend.text = element_text(size = 10), legend.key.height=unit(.8,"line"))
+
+
+# fig S1E -----
+library(CytoTRACE2)
+library(patchwork)
+cytotrace2_result <- cytotrace2(adipo.inte.5000,is_seurat = T)
+annotation <- data.frame(phenotype = adipo.inte.5000@meta.data$large_ct) %>% 
+  set_rownames(., colnames(adipo.inte.5000))
+
+# plotting
+plots <- plotData(cytotrace2_result = cytotrace2_result, 
+                  annotation = annotation, 
+                  is_seurat = T)                      
+library(ggpubr)
+cytotrace2_result$large_ct <- factor(cytotrace2_result$large_ct,levels = c('FAPs','Brown Adipocytes','White Adipocytes'))
+
+p1 <- ggboxplot(cytotrace2_result@meta.data, x="large_ct", y="CytoTRACE2_Score", width = 0.6, 
+                color = "black",
+                fill="large_ct",
+                palette = "npg",
+                xlab = F, 
+                bxp.errorbar=T,
+                bxp.errorbar.width=0.5, 
+                size=1, 
+                outlier.shape=NA,
+                legend = "right",
+                alpha = 0.8) + 
+  ylab('Potency score')  + 
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = 45,hjust = 1,vjust = 1),axis.title.x = element_blank(),legend.position = 'none')
+
+my_comparisons <- list(c("FAPs", "Brown Adipocytes"), c("Brown Adipocytes", "White Adipocytes"))
+p1+stat_compare_means(comparisons = my_comparisons,
+                      method = "wilcox.test")
+
+# fig S1F & G & H------
+w.adipo <- subset(combined.sct, cells = WhichCells(combined.sct, idents = c('White adipocytes')))
+DimPlot(w.adipo,raster = F)
+
+w.adipo <- RunUMAP(w.adipo,dims = 1:30)
+w.adipo <- CreateSeuratObject(counts = GetAssayData(object = w.adipo, slot = "counts"),
+                                 meta.data = w.adipo@meta.data)
+# re-integrated adipocytes -------
+adipo.split <- SplitObject(w.adipo,split.by = 'samples')
+plan(multisession, workers=1)
+adipo.split <- lapply(X = adipo.split, FUN = function(x){
+  x <- NormalizeData(x)
+  x <- FindVariableFeatures(x, selection.method = 'vst',nfeatures = 1500)
+})
+features <- SelectIntegrationFeatures(adipo.split,nfeatures = 1500)
+
+plan(multisession, workers=40)
+adipo.split <- lapply(X = adipo.split, FUN = function(x){
+  x <- ScaleData(x, vars.to.regress = c("mitoRatio",'G2M.Score','S.Score'),features = features)
+  x <- RunPCA(x,features = features)
+})
+save.image()
+anchors <- FindIntegrationAnchors(object.list = adipo.split,
+                                  # normalization.method = "SCT",
+                                  anchor.features = features,
+                                  reduction = 'rpca',k.anchor = 20)
+w.adipo.inte <- IntegrateData(anchorset = anchors)
+rm(w.adipo,anchors,adipo.split)
+DefaultAssay(w.adipo.inte) <- 'integrated'
+w.adipo.inte <- w.adipo.inte %>% 
+  ScaleData() %>%
+  RunPCA( verbose = FALSE) %>% 
+  RunUMAP( reduction = "pca", dims = 1:30, verbose = FALSE) 
+
+w.adipo.inte$con_gan <- factor(w.adipo.inte$con_gan, levels = c('ND_male','HFD_male','ND_female','HFD_female'))
+DimPlot(w.adipo.inte,raster = F,label = F, cols = simpson.col, group.by = 'con_gan',split.by = 'con_gan',raster.dpi = c(4096,4096),pt.size = .5) + ggtitle('') +
+  NoAxes() + 
+  # scale_color_igv() + 
+  theme(panel.background=element_rect(fill='transparent', color='black'), 
+        title = element_text(size = 10),
+        legend.text = element_text(size = 10), legend.key.height=unit(.8,"line"))
+
+comlist <- t(combn(unique(w.adipo.inte$condition), 2))
+
+for (ct in unique(w.adipo.inte$gander)) {
+  print(ct)
+  Idents(w.adipo.inte) <- 'gander'
+  sub.seu.1 <- subset(w.adipo.inte, idents = ct)
+  for (gp in nrow(comlist)) {
+    age1 <- comlist[gp,1]
+    age2 <- comlist[gp,2]
+    DEGs <- FindMarkers(sub.seu.1,
+                        ident.1 = age2,
+                        ident.2 = age1, 
+                        logfc.threshold = 0.01,
+                        group.by = 'condition')
+    DEGs.name <- paste('w.adipo.all',ct,age2,age1,sep = '_')
+    assign(DEGs.name,DEGs)
+  }
+}
+w.adipo.all.deg <- list(w.adipo.all_male_MC_MO = w.adipo.all_male_ND_HFD,
+                        w.adipo.all_female_MC_MO = w.adipo.all_female_ND_HFD)
+rio::export(w.adipo.all.deg, file = '../01.analysis/063fig.final//Table6.white adipocytes wilcox.test.lfc0.01.xlsx',row.names = T)
+
+keyvals.colour <- ifelse(
+  w.adipo.all_male_ND_HFD$avg_log2FC < -0.25, 'royalblue',
+  ifelse(w.adipo.all_male_ND_HFD$avg_log2FC > 0.25, 'red3',
+         'gray80'))
+keyvals.colour[is.na(keyvals.colour)] <- 'gray80'
+names(keyvals.colour)[keyvals.colour == 'red3'] <- 'MC high'
+names(keyvals.colour)[keyvals.colour == 'gray80'] <- 'No sig'
+names(keyvals.colour)[keyvals.colour == 'royalblue'] <- 'MO high'
+
+EnhancedVolcano(w.adipo.all_male_ND_HFD,
+                lab = rownames(w.adipo.all_male_ND_HFD),
+                selectLab = 'Ucp1',
+                x = 'avg_log2FC',
+                y = 'p_val_adj',
+                FCcutoff = 0.25,
+                pCutoff = 0.05,
+                ylab = bquote(~-Log[10]~ 'padj'),
+                pointSize = 1.0,
+                labSize = 4,
+                labCol = 'black',
+                labFace = 'bold',
+                boxedLabels = TRUE,
+                parseLabels = T,
+                # col = c('gray80', 'gray80', 'gray80', 'red3'),
+                colCustom = keyvals.colour,
+                colAlpha = 2/5,
+                legendPosition = 'right',
+                legendLabSize = 10,
+                legendIconSize = 3.0,
+                drawConnectors = TRUE,
+                widthConnectors = .5,
+                max.overlaps = 300,
+                colConnectors = '#14213d',
+                title = 'Male',
+                subtitle = '',
+                xlim = c(-1.5,1.5)
+) 
+
+
+keyvals.colour <- ifelse(
+  w.adipo.all_female_ND_HFD$avg_log2FC < -0.25, 'royalblue',
+  ifelse(w.adipo.all_female_ND_HFD$avg_log2FC > 0.25, 'red3',
+         'gray80'))
+keyvals.colour[is.na(keyvals.colour)] <- 'gray80'
+names(keyvals.colour)[keyvals.colour == 'red3'] <- 'mND high'
+names(keyvals.colour)[keyvals.colour == 'gray80'] <- 'No sig'
+names(keyvals.colour)[keyvals.colour == 'royalblue'] <- 'mHFD high'
+
+EnhancedVolcano(w.adipo.all_female_ND_HFD,
+                lab = rownames(w.adipo.all_female_ND_HFD),
+                selectLab = 'Ucp1',
+                x = 'avg_log2FC',
+                y = 'p_val_adj',
+                FCcutoff = 0.25,
+                pCutoff = 0.05,
+                ylab = bquote(~-Log[10]~ 'padj'),
+                pointSize = 1.0,
+                labSize = 4,
+                labCol = 'black',
+                labFace = 'bold',
+                boxedLabels = TRUE,
+                parseLabels = T,
+                # col = c('gray80', 'gray80', 'gray80', 'red3'),
+                colCustom = keyvals.colour,
+                colAlpha = 2/5,
+                legendPosition = 'right',
+                legendLabSize = 10,
+                legendIconSize = 3.0,
+                drawConnectors = TRUE,
+                widthConnectors = .5,
+                max.overlaps = 300,
+                colConnectors = '#14213d',
+                title = 'Female',
+                subtitle = '',
+                xlim = c(-1.5,1.5)
+) 
+
+# fig S1I & J& K ----
+plan(multisession, workers=1)
+nbrOfWorkers()
+# subtype from all cells -------
+fap.only <- subset(combined.sct, cells = WhichCells(combined.sct, idents = c('FAPs')))
+DimPlot(fap.only,raster = F)
+
+fap.only <- RunUMAP(fap.only,dims = 1:30)
+fap.only <- CreateSeuratObject(counts = GetAssayData(object = fap.only, slot = "counts"),
+                                 meta.data = fap.only@meta.data)
+# re-integrated fapcytes -------
+fap.split <- SplitObject(fap.only,split.by = 'samples')
+
+fap.split <- lapply(X = fap.split, FUN = function(x){
+  x <- NormalizeData(x)
+  x <- FindVariableFeatures(x, selection.method = 'vst',nfeatures = 1500)
+})
+features <- SelectIntegrationFeatures(fap.split,nfeatures = 1500)
+
+plan(multisession, workers=40)
+fap.split <- lapply(X = fap.split, FUN = function(x){
+  x <- ScaleData(x, vars.to.regress = c("mitoRatio",'G2M.Score','S.Score'),features = features)
+  x <- RunPCA(x,features = features)
+})
+save.image()
+anchors <- FindIntegrationAnchors(object.list = fap.split,
+                                  # normalization.method = "SCT",
+                                  anchor.features = features,
+                                  reduction = 'rpca',k.anchor = 20)
+fap.only.inte <- IntegrateData(anchorset = anchors)
+fap.only.inte <- fap.only.inte %>% 
+  ScaleData() %>%
+  RunPCA( verbose = FALSE) %>% 
+  RunUMAP( reduction = "pca", dims = 1:30, verbose = FALSE) 
+
+DimPlot(fap.only.inte,raster = F,label = F, cols = simpson.col, group.by = 'con_gan',split.by = 'con_gan',raster.dpi = c(4096,4096),pt.size = .5) + ggtitle('') +
+  NoAxes() + 
+  # scale_color_igv() + 
+  theme(panel.background=element_rect(fill='transparent', color='black'), 
+        title = element_text(size = 10),
+        legend.text = element_text(size = 10), legend.key.height=unit(.8,"line"))
+
+comlist <- t(combn(unique(fap.only.inte$condition), 2))
+
+for (ct in unique(fap.only.inte$gander)) {
+  print(ct)
+  Idents(fap.only.inte) <- 'gander'
+  sub.seu.1 <- subset(fap.only.inte, idents = ct)
+  for (gp in nrow(comlist)) {
+    age1 <- comlist[gp,1]
+    age2 <- comlist[gp,2]
+    DEGs <- FindMarkers(sub.seu.1,
+                        ident.1 = age2,
+                        ident.2 = age1, 
+                        logfc.threshold = 0.01,
+                        group.by = 'condition')
+    DEGs.name <- paste('fap.all',ct,age2,age1,sep = '_')
+    assign(DEGs.name,DEGs)
+  }
+}
+fap.all.deg <- list(fap.all_male_MC_MO = fap.all_male_ND_HFD,
+                      fap.all_female_MC_MO = fap.all_female_ND_HFD)
+rio::export(fap.all.deg, file = '../01.analysis/063fig.final//Table5.FAPs wilcox.test.lfc0.01.xlsx',row.names = T)
+
+keyvals.colour <- ifelse(
+  fap.all_male_ND_HFD$avg_log2FC < -0.25, 'royalblue',
+  ifelse(fap.all_male_ND_HFD$avg_log2FC > 0.25, 'red3',
+         'gray80'))
+keyvals.colour[is.na(keyvals.colour)] <- 'gray80'
+names(keyvals.colour)[keyvals.colour == 'red3'] <- 'MC high'
+names(keyvals.colour)[keyvals.colour == 'gray80'] <- 'No sig'
+names(keyvals.colour)[keyvals.colour == 'royalblue'] <- 'MO high'
+
+EnhancedVolcano(fap.all_male_ND_HFD,
+                lab = rownames(fap.all_male_ND_HFD),
+                selectLab = 'Ucp1',
+                x = 'avg_log2FC',
+                y = 'p_val_adj',
+                FCcutoff = 0.25,
+                pCutoff = 0.05,
+                ylab = bquote(~-Log[10]~ 'padj'),
+                pointSize = 1.0,
+                labSize = 4,
+                labCol = 'black',
+                labFace = 'bold',
+                boxedLabels = TRUE,
+                parseLabels = T,
+                # col = c('gray80', 'gray80', 'gray80', 'red3'),
+                colCustom = keyvals.colour,
+                colAlpha = 2/5,
+                legendPosition = 'right',
+                legendLabSize = 10,
+                legendIconSize = 3.0,
+                drawConnectors = TRUE,
+                widthConnectors = .5,
+                max.overlaps = 300,
+                colConnectors = '#14213d',
+                title = 'Male',
+                subtitle = '',
+                xlim = c(-1.5,1.5)
+) 
+
+
+keyvals.colour <- ifelse(
+  fap.all_female_ND_HFD$avg_log2FC < -0.25, 'royalblue',
+  ifelse(fap.all_female_ND_HFD$avg_log2FC > 0.25, 'red3',
+         'gray80'))
+keyvals.colour[is.na(keyvals.colour)] <- 'gray80'
+names(keyvals.colour)[keyvals.colour == 'red3'] <- 'mND high'
+names(keyvals.colour)[keyvals.colour == 'gray80'] <- 'No sig'
+names(keyvals.colour)[keyvals.colour == 'royalblue'] <- 'mHFD high'
+
+EnhancedVolcano(fap.all_female_ND_HFD,
+                lab = rownames(fap.all_female_ND_HFD),
+                selectLab = 'Ucp1',
+                x = 'avg_log2FC',
+                y = 'p_val_adj',
+                FCcutoff = 0.25,
+                pCutoff = 0.05,
+                ylab = bquote(~-Log[10]~ 'padj'),
+                pointSize = 1.0,
+                labSize = 4,
+                labCol = 'black',
+                labFace = 'bold',
+                boxedLabels = TRUE,
+                parseLabels = T,
+                # col = c('gray80', 'gray80', 'gray80', 'red3'),
+                colCustom = keyvals.colour,
+                colAlpha = 2/5,
+                legendPosition = 'right',
+                legendLabSize = 10,
+                legendIconSize = 3.0,
+                drawConnectors = TRUE,
+                widthConnectors = .5,
+                max.overlaps = 300,
+                colConnectors = '#14213d',
+                title = 'Female',
+                subtitle = '',
+                xlim = c(-1.5,1.5)
+) 
+                       
