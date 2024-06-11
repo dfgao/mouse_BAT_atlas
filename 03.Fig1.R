@@ -164,7 +164,49 @@ com.dot.new(combined.sct, feature = c('Pparg','Ppargc1b','Ppara',
                                                  'Arhgap15','Ikzf1','Dock2')
                        ,groups = "con_gan",strip.color = cluster_colors)
 
-# fig 1F & 1G------
+# fig 1F -----
+CellTypeCompositionAnalysis.R code path:https://github.com/Teichlab/sctkr/blob/2a024cafef1aae192bf9656349449c5a84d1c6ed/R/CellTypeCompositionAnalysis.R
+source(CellTypeCompositionAnalysis.R)
+plot.data.num <- FetchData(combined.sct, 
+                       vars = c("ident", "large_ct")) %>%
+  dplyr::count(ident, large_ct) %>% 
+  tidyr::spread(ident, n) 
+plot.data.num[is.na(plot.data.num)] <- 0
+export(plot.data,file = '../cell.number.xlsx')
+
+cell_types <- cell.number$large_ct
+n_cells_per_sample <- colSums(cell.number)
+n_var_cats <- 2
+sample_cats <- tibble(
+  Sample_ID = sample_ids,
+  Treatment = c(rep('MO',4),rep('MC',4)),
+  Gender = c(rep('Female',2),rep('Male',2),rep('Female',2),rep('Male',2)),
+  cell.num = n_cells_per_sample
+)
+sample_num1_values <- rnorm(length(sample_ids), mean = 10, sd = 1) 
+obs_tbl <- data.frame(
+  Sample_ID = rep(sample_ids, c(n_cells_per_sample)),
+  Treatment = rep(sample_cats$Treatment, c(n_cells_per_sample)),
+  Gender = rep(sample_cats$Gender, c(n_cells_per_sample)),
+  #Var_Num1 = rnorm(n_cells_per_sample * length(sample_ids), mean = 10, sd = 1)
+  Var_Num1 = rep(sample_num1_values, c(n_cells_per_sample))
+)
+obs_tbl$Cell_type <- c(rep(cell.number$large_ct,c(cell.number$HDF_F1)),
+                       rep(cell.number$large_ct,c(cell.number$HDF_F2)),
+                       rep(cell.number$large_ct,c(cell.number$HDF_M1)),
+                       rep(cell.number$large_ct,c(cell.number$HDF_M2)),
+                       rep(cell.number$large_ct,c(cell.number$ND_F1)),
+                       rep(cell.number$large_ct,c(cell.number$ND_F2)),
+                       rep(cell.number$large_ct,c(cell.number$ND_M1)),
+                       rep(cell.number$large_ct,c(cell.number$ND_M2))
+                       )
+results <- CellTypeCompositionAnalysis(obs_tbl, "Sample_ID", "Cell_type", c("Treatment", "Gender"), "Var_Num1")
+vars3 <- list(Treatment = c('MC','MO'), Gender = c('Female','Male'))
+ranef_plot <- plot_ranef(ranef_tbl, vars = vars3, celltypes = cell_types, celltype_order = rev(cell_types),
+                         maxFC = 2, LTSR2p = FALSE)
+sdse_plot <- plot_sdse(sdse_tbl, "Sample_ID", ci = 0.95, xlim = c(0, .5))
+
+# fig 1G & 1H------
 Idents(combined.sct) <- combined.sct$large_ct
 adipo.only <- subset(combined.sct, cells = WhichCells(combined.sct, idents = c('Brown adipocytes')))
 dim(adipo.only)
