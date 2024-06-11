@@ -237,4 +237,10 @@ cell.ratio <- list(cell.number = plot.data.num, cell.ratio = plot.data.wide)
 export(cell.ratio,file = '../01.analysis/01.all.samples/cell.info.xlsx')
 
 DimPlot(combined.sct,raster = F,label = F,split.by = 'samples', group.by = 'samples') + scale_color_jco()
+
+combined.sct$condition <- NA
+combined.sct$condition[which(str_detect(combined.sct@meta.data$cells, "^HDF_"))] <- "MO"
+combined.sct$condition[which(str_detect(combined.sct@meta.data$cells, "^ND_"))] <- "MC"
+combined.sct$con_gan <- paste0(combined.sct$condition, "_",combined.sct$gander)
+
 save.image()
