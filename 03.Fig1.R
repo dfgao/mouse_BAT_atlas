@@ -166,7 +166,7 @@ com.dot.new(combined.sct, feature = c('Pparg','Ppargc1b','Ppara',
 
 # fig 1F -----
 CellTypeCompositionAnalysis.R code path:https://github.com/Teichlab/sctkr/blob/2a024cafef1aae192bf9656349449c5a84d1c6ed/R/CellTypeCompositionAnalysis.R
-source(CellTypeCompositionAnalysis.R)
+source('CellTypeCompositionAnalysis.R')
 plot.data.num <- FetchData(combined.sct, 
                        vars = c("ident", "large_ct")) %>%
   dplyr::count(ident, large_ct) %>% 
